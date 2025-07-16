@@ -1,10 +1,10 @@
 import express from 'express';
-import redis from 'redis';
-import kue from 'kue';
+import { createClient } from 'redis';
 import { promisify } from 'util';
+import kue from 'kue';
 
 const app = express();
-const client = redis.createClient();
+const client = createClient();
 const queue = kue.createQueue();
 const getAsync = promisify(client.get).bind(client);
 
@@ -16,7 +16,7 @@ function reserveSeat(number) {
 
 async function getCurrentAvailableSeats() {
   const seats = await getAsync('available_seats');
-  return seats ? parseInt(seats, 10) : 0;
+  return seats ? parseInt(seats) : 0;
 }
 
 // Initialize available seats
@@ -33,7 +33,14 @@ app.get('/reserve_seat', (req, res) => {
     return;
   }
 
-  const job = queue.create('reserve_seat');
+  const job = queue.create('reserve_seat')
+    .save((err) => {
+      if (err) {
+        res.json({ status: 'Reservation failed' });
+      } else {
+        res.json({ status: 'Reservation in process' });
+      }
+    });
 
   job.on('complete', () => {
     console.log(`Seat reservation job ${job.id} completed`);
@@ -41,14 +48,6 @@ app.get('/reserve_seat', (req, res) => {
 
   job.on('failed', (err) => {
     console.log(`Seat reservation job ${job.id} failed: ${err.message}`);
-  });
-
-  job.save((err) => {
-    if (!err) {
-      res.json({ status: 'Reservation in process' });
-    } else {
-      res.json({ status: 'Reservation failed' });
-    }
   });
 });
 
